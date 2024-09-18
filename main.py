@@ -2,8 +2,10 @@ from seleniumwire import webdriver  # Import from seleniumwire to capture reques
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
-import json
 import requests
 from anticaptchaofficial.geetestproxyless import geetestProxyless
 
@@ -17,7 +19,6 @@ def get_cookies_as_dict(driver):
 
 # Setup Chrome options
 chrome_options = Options()
-chrome_options.add_argument('--headless')  # Run in headless mode
 chrome_options.add_argument('--disable-gpu')
 
 # Initialize the Chrome WebDriver with selenium-wire to capture requests
@@ -28,8 +29,8 @@ driver.request_storage = False
 # Open the webpage that contains the CAPTCHA iframe
 driver.get('https://mygift.giftcardmall.com')  # Replace with the actual URL
 
-# Wait for the page to load (you can customize the waiting time or use WebDriverWait)
-time.sleep(5)
+# Wait for the page to load completely
+WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
 
 # Capture user-agent and cookies from Selenium session
 user_agent = driver.execute_script("return navigator.userAgent;")
@@ -38,6 +39,10 @@ cookies = driver.get_cookies()
 # Get cookies as a dictionary
 cookie_string = '; '.join([f"{cookie['name']}={cookie['value']}" for cookie in cookies])
 print("Cookies:", cookie_string)
+
+# Switch to iframe that contains the CAPTCHA
+iframe = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//iframe[contains(@src, 'captcha-delivery.com')]")))
+driver.switch_to.frame(iframe)
 
 # Loop through network requests to find the one that matches "captcha-delivery.com"
 captcha_gt = None
@@ -51,9 +56,10 @@ for request in driver.requests:
             print('Captcha GT:', captcha_gt)
             break  # Exit loop once captcha parameters are found
 
-# Close the browser
+# Return to main content from iframe
+driver.switch_to.default_content()
 
-if captcha_gt is None or captcha_challenge is None :
+if captcha_gt is None or captcha_challenge is None:
     print("Error: CAPTCHA ID not found.")
 else:
     # Replace with your actual Anti-Captcha API key
@@ -77,19 +83,55 @@ else:
     if g_response != 0:
         print(f"CAPTCHA Solved: {g_response}")
 
+        # Switch to the CAPTCHA iframe again
+        driver.switch_to.frame(iframe)
+
         # Inject the CAPTCHA solution (g_response) into the hidden input field inside the iframe
-        driver.execute_script(f"document.getElementById('g-recaptcha-response').value = '{g_response}';")
+        # driver.execute_script(f"document.getElementById('geetest_validate').value = '{g_response}';")
+
+        # Execute JavaScript to trigger CAPTCHA submission
+        # driver.switch_to.default_content()
+
+        # Inject and execute the JavaScript code for captchaCallback (from your provided code)
         
-        # Submit the form inside the iframe (if there is a form to submit)
-        submit_button = driver.find_element_by_xpath("//button[@type='submit']")  # Adjust the XPath according to the actual button
-        submit_button.click()
         
-        # Switch back to the default content after submitting the form
-        driver.switch_to.default_content()
         
-        # Allow time for the form submission and redirection
-        time.sleep(5)
+        lot_number = g_response['lot_number']
+        gen_time = g_response['gen_time']
+        pass_token = g_response['pass_token']
+        captcha_output = g_response['captcha_output']
+        captcha_id = g_response['captcha_id']
+        isOffline = 'true' if g_response['isOffline'] is True else 'false'
+        
+        
+        js_code = f"""
+        ddm.cid = '{captcha_gt}';
+        ddm.hash = '{captcha_challenge}';
+        
+        console.log(ddm);
+
+        window.captchaResponse = {{
+            lot_number: '{lot_number}',
+            gen_time: {gen_time},
+            pass_token: '{pass_token}',
+            captcha_output: '{captcha_output}',
+            captcha_id: '{captcha_id}',
+            isOffline: {isOffline},
+        }};
+        window.captchaCallback();
+        """
+        
+        driver.execute_script(js_code)
+
+        # Wait for the submission and the page to reload
+        time.sleep(15)
+
+        # Check if the CAPTCHA was successfully solved and the page navigated
+        print("CAPTCHA bypassed and form submitted. Proceeding to next page.")
     else:
         print(f"Error solving CAPTCHA: {solver.error_code}")
-        
-driver.quit()
+
+# while True:
+#     key = input("Press 'x' to continue: ")
+#     if key.lower() == 'x':
+#         break
